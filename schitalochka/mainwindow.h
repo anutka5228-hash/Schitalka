@@ -35,6 +35,8 @@ private:
     bool rhymeRunning;
     QLabel *highlightedLabel;
     QLabel *currentRhymeWordLabel;
+    QLabel *teamLabel;
+    QPushButton *aboutButton;
 
     QMediaPlayer *outPlayer;
     QMediaPlayer *fireworksPlayer;
@@ -54,6 +56,10 @@ private:
     void highlightCurrentPerson();
     void clearAllWordLabels();
     void loadSounds();
+    int calculateWinningStartIndex(const QString &winnerName, int wordsCount);
+    void startNewRound();
+    QString winnerName = "Miliakova";
+    QString teamInfoText() const;
 };
 
 #endif // MAINWINDOW_H
