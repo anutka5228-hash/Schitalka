@@ -65,6 +65,9 @@ MainWindow::MainWindow(QWidget *parent)
     QString rhyme = selectRandomRhyme(rhymes);
     rhymeWords = rhyme.split(QRegularExpression("\\s+"));
 
+    rhymeWords.removeAll("");
+    qDebug() << "Слова считалки:" << rhymeWords;
+
     rhymeTimer = new QTimer(this);
     rhymeTimer->setSingleShot(false);
     connect(rhymeTimer, &QTimer::timeout, this, &MainWindow::updateRhymeWord);
@@ -114,7 +117,7 @@ QList<Person> MainWindow::loadPhotos(const QString &folderPath)
     QDir dir(folderPath);
 
     if (!dir.exists()) {
-        qDebug() << "Папка не существует:" << folderPath;
+        qDebug() << "Папка не существует." << folderPath;
         return persons;
     }
 
@@ -143,6 +146,7 @@ void MainWindow::highlightCurrentPerson()
         }
     }
 }
+
 void MainWindow::loadSounds()
 {
     QString appPath = QApplication::applicationDirPath();
@@ -173,6 +177,7 @@ void MainWindow::loadSounds()
         qDebug() << "Звук не найден:" << fireworkPath;
     }
 }
+
 void MainWindow::displayPhotosInCircle(const QList<Person> &persons)
 {
     int centerX = width() / 2;
@@ -213,6 +218,7 @@ void MainWindow::displayPhotosInCircle(const QList<Person> &persons)
         wordLabels.append(wordLabel);
     }
 }
+
 void MainWindow::updateWordOverPhoto(int index, const QString &word)
 {
     for (QLabel *label : wordLabels) {
@@ -253,6 +259,59 @@ QString MainWindow::findLongestWord(const QString &rhyme)
     return longestWord;
 }
 
+
+int MainWindow::calculateWinningStartIndex(const QString &winnerName, int wordsCount)
+{
+    int winnerIndex = -1;
+    for (int i = 0; i < persons.size(); ++i) {
+        if (persons[i].name == winnerName) {
+            winnerIndex = i;
+            break;
+        }
+    }
+
+    if (winnerIndex == -1) {
+        qDebug() << "Победителя" << winnerName << "нет в списке.";
+        return QRandomGenerator::global()->bounded(persons.size());
+    }
+
+    int n = persons.size();
+
+    for (int tryStart = 0; tryStart < n; ++tryStart) {
+        int eliminationIndex = (tryStart + wordsCount - 1) % n;
+        if (eliminationIndex != winnerIndex) {
+            qDebug() << "Найден стартовый индекс:" << tryStart;
+            qDebug() << "Выбывает:" << persons[eliminationIndex].name;
+            qDebug() << "Победитель остается:" << persons[winnerIndex].name;
+            return tryStart;
+        }
+    }
+    return 0;
+}
+
+void MainWindow::startNewRound()
+{
+    if (persons.isEmpty() || rhymeWords.isEmpty()) {
+        return;
+    }
+
+    rhymeRunning = true;
+    currentWordIndex = 0;
+
+    currentIndex = calculateWinningStartIndex(winnerName, rhymeWords.size());
+
+    currentRhymeWordLabel->setText(rhymeWords[0]);
+    currentRhymeWordLabel->show();
+
+    updateWordOverPhoto(currentIndex, rhymeWords[0]);
+    highlightCurrentPerson();
+
+    rhymeTimer->start(300);
+
+    nextWordButton->setEnabled(false);
+    nextWordButton->setVisible(false);
+}
+
 void MainWindow::onNextWordButtonClicked()
 {
     if (persons.isEmpty() || rhymeWords.isEmpty()) {
@@ -260,21 +319,7 @@ void MainWindow::onNextWordButtonClicked()
     }
 
     if (!rhymeRunning) {
-        rhymeRunning = true;
-        currentWordIndex = 0;
-        currentIndex = QRandomGenerator::global()->bounded(persons.size());
-
-        currentRhymeWordLabel->setText(rhymeWords[0]);
-        currentRhymeWordLabel->show();
-
-        updateWordOverPhoto(currentIndex, rhymeWords[0]);
-
-        highlightCurrentPerson();
-
-        rhymeTimer->start(700);
-
-        nextWordButton->setEnabled(false);
-        nextWordButton->setVisible(false);
+        startNewRound();
     }
 }
 
@@ -294,10 +339,14 @@ void MainWindow::updateRhymeWord()
     if (currentWordIndex >= rhymeWords.size()) {
         rhymeTimer->stop();
 
+
         int indexToRemove = currentIndex;
 
-        QTimer::singleShot(500, this, [this, indexToRemove]() {
+        QTimer::singleShot(300, this, [this, indexToRemove]() {
             if (indexToRemove < persons.size()) {
+                if (persons[indexToRemove].name == winnerName) {
+                    qDebug() << "Ошибка, победитель выбывает.";
+                }
                 currentIndex = indexToRemove;
                 removeCurrentPerson();
             }
@@ -305,18 +354,25 @@ void MainWindow::updateRhymeWord()
         });
         return;
     }
- currentRhymeWordLabel->setText(rhymeWords[currentWordIndex]);
+
+    currentRhymeWordLabel->setText(rhymeWords[currentWordIndex]);
     currentIndex = (currentIndex + 1) % persons.size();
 
     updateWordOverPhoto(currentIndex, rhymeWords[currentWordIndex]);
-     highlightCurrentPerson();
-
+    highlightCurrentPerson();
 }
-
 
 void MainWindow::removeCurrentPerson()
 {
     if (currentIndex < 0 || currentIndex >= persons.size()) return;
+
+
+    if (persons[currentIndex].name == winnerName) {
+        qDebug() << "Ошибка. Удаляем победителя.";
+
+        currentIndex = calculateWinningStartIndex(winnerName, rhymeWords.size());
+        return;
+    }
 
     if (currentIndex < photoLabels.size()) {
         animateRemoval(photoLabels[currentIndex]);
@@ -330,7 +386,11 @@ void MainWindow::removeCurrentPerson()
     wordLabels.removeAt(currentIndex);
 
     if (persons.size() == 1) {
-        QTimer::singleShot(1000, this, &MainWindow::displayWinner);
+        if (persons[0].name == winnerName) {
+            QTimer::singleShot(500, this, &MainWindow::displayWinner);
+        } else {
+            qDebug() << "Ошибка. Победитель не тот.";
+        }
     } else if (persons.size() > 0) {
         if (currentIndex >= persons.size()) {
             currentIndex = 0;
@@ -338,16 +398,13 @@ void MainWindow::removeCurrentPerson()
 
         rebuildCircle();
 
-        QTimer::singleShot(500, this, [this]() {
-            currentWordIndex = 0;
-            rhymeRunning = true;
-            currentRhymeWordLabel->setText(rhymeWords[0]);
-            currentRhymeWordLabel->show();
-            updateWordOverPhoto(currentIndex, rhymeWords[0]);
-            rhymeTimer->start(700);
+        QTimer::singleShot(300, this, [this]() {
+            startNewRound();
         });
     }
 }
+
+
 void MainWindow::rebuildCircle()
 {
     for (QLabel *label : photoLabels) {
@@ -422,6 +479,7 @@ void MainWindow::displayWinner()
     crownLabel->setAlignment(Qt::AlignCenter);
     crownLabel->setStyleSheet("background: transparent;");
     crownLabel->resize(150, 150);
-    crownLabel->move(width()/2 - 130, height()/2 - 300);
+    crownLabel->move(width()/2 - 100, height()/2 - 300);
     crownLabel->show();
 }
+
